@@ -1,13 +1,11 @@
 package first;
 
 import robocode.*;
-
 import java.util.Map;
 
 import first.kdTree.*;
 
 import java.awt.Color;
-import java.awt.geom.Point2D;
 import java.util.HashMap;
 
 public class FirstBot extends AdvancedRobot {
@@ -21,13 +19,28 @@ public class FirstBot extends AdvancedRobot {
 		setAdjustRadarForGunTurn(true);
 
 		setColors(Color.WHITE, Color.YELLOW, Color.YELLOW); // HINT: change bot colours
-		setTurnRadarRightRadians(Double.POSITIVE_INFINITY);
+		setTurnRadarRightRadians(Double.POSITIVE_INFINITY); // HINT: sweep only the 2 enemies, not the whole field
 
 		while (true) {
 			move();	
 		}
 	}
 
+	public void onScannedRobot(ScannedRobotEvent e) {
+		State current = computeEnemyState(e);
+		storeEnemyState(e, current); // store current state
+
+		double firePower = Math.min(500 / e.getDistance(), 3); // firePower based on distance
+		double bulletSpeed = 20 - firePower * 3;
+		long timeToHit = (long) (e.getDistance() / bulletSpeed); // distance = rate * time, solved for time
+
+		// predict his next location
+		double[] predicted = predictFutureLocation(e, timeToHit, current);
+
+		shootAtLocation(firePower, predicted);
+
+	}
+	
 	public void move() {
 		setAhead(40000); // move ahead some large number
 		movingForward = true;
@@ -43,31 +56,19 @@ public class FirstBot extends AdvancedRobot {
 		
 		// HINT: have a bit more randomness in this bot's movement
 	}
-	
-	public void onScannedRobot(ScannedRobotEvent e) {
-		State current = computeEnemyState(e);
-		storeEnemyState(e, current); // store current state
-
-		double firePower = Math.min(500 / e.getDistance(), 3); // firepower based on distance
-		double bulletSpeed = 20 - firePower * 3;
-		long timeToHit = (long) (e.getDistance() / bulletSpeed); // distance = rate * time, solved for time
-
-		// predict his next location
-		double[] predicted = predictFutureLocation(e, timeToHit, current);
-
-		shootAtLocation(firePower, predicted);
-
-	}
 
 	private void shootAtLocation(double firePower, double[] predicted) {
-		double absDeg = absoluteBearing(getX(), getY(), predicted[0], predicted[1]);
+		double absDeg = Utils.absoluteBearing(getX(), getY(), predicted[0], predicted[1]);
 		
-		setTurnGunRight(normalizeBearing(absDeg - getGunHeading())); // turn the gun to the predicted x,y location
+		setTurnGunRight(Utils.normalizeBearing(absDeg - getGunHeading())); // turn the gun to the predicted x,y location
 
 		// HINT: do not shoot if our energy is less than firePower, it is suicide
 		if (getGunHeat() == 0 && Math.abs(getGunTurnRemaining()) < 10) {
 			setFire(firePower);
 		}
+		
+		// HINT: store the name of the closest enemy, update that each turn, and shoot only at it
+		// HINT: if an enemy has very little energy, shoot 1 fast bullet at it
 	}
 
 	private void storeEnemyState(ScannedRobotEvent e, State current) {
@@ -115,41 +116,8 @@ public class FirstBot extends AdvancedRobot {
 		return new double[] { current.x + to.x - from.x, current.y + to.y - from.y };
 	}
 
-	// normalizes a bearing to between +180 and -180
-	double normalizeBearing(double angle) {
-		while (angle > 180) {
-			angle -= 360;
-		}
-		
-		while (angle < -180) {
-			angle += 360;
-		}
-		
-		return angle;
-	}
-
-	// computes the absolute bearing between two points
-	double absoluteBearing(double x1, double y1, double x2, double y2) {
-		double xo = x2 - x1;
-		double yo = y2 - y1;
-		double hyp = Point2D.distance(x1, y1, x2, y2);
-		double arcSin = Math.toDegrees(Math.asin(xo / hyp));
-		double bearing = 0;
-
-		if (xo > 0 && yo > 0) { // both pos: lower-Left
-			bearing = arcSin;
-		} else if (xo < 0 && yo > 0) { // x neg, y pos: lower-right
-			bearing = 360 + arcSin; // arcsin is negative here, actually 360 - ang
-		} else if (xo > 0 && yo < 0) { // x pos, y neg: upper-left
-			bearing = 180 - arcSin;
-		} else if (xo < 0 && yo < 0) { // both neg: upper-right
-			bearing = 180 - arcSin; // arcsin is negative here, actually 180 + ang
-		}
-
-		return bearing;
-	}
-
 	public void onHitWall(HitWallEvent e) {
+		// HINT: try not to hit walls, it causes you damage
 		reverseDirection();
 	}
 
@@ -168,4 +136,6 @@ public class FirstBot extends AdvancedRobot {
 			reverseDirection();
 		}
 	}
+	
+	// HINT: use a KDTree to store your own moves, and based on them predict where SecondBot will assume you are
 }

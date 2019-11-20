@@ -5,7 +5,7 @@ import first.kdTree.StateInterface;
 
 public class State implements StateInterface {
 	public static final Rectangle MAX_RECTANGLE = new Rectangle(2, new double[] {0, 0}, new double[] {1000, 1000});
-	double x, y;
+	double x, y; // we store only the (x, y) coordinaates of an enemy
 	
 	@Override	
 	public double[]  values()   {
