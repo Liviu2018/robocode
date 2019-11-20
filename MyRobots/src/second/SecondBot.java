@@ -4,16 +4,19 @@ import robocode.*;
 
 import java.util.Map;
 
-import second.kdTree.*;
+import second.State;
+import second.kdTree.Node;
+import second.kdTree.Tree;
 
 import java.awt.Color;
 import java.awt.geom.Point2D;
 import java.util.HashMap;
 
+
 public class SecondBot extends AdvancedRobot {
-	Map<String, Tree> enemies = new HashMap<String, Tree>();
-	Map<String, State> lastEnemyState = new HashMap<String, State>();
-	boolean movingForward;
+	private static Map<String, Tree> enemies = new HashMap<String, Tree>();
+	private static Map<String, State> lastEnemyState = new HashMap<String, State>();
+	private static boolean movingForward;
 
 	public void run() {
 		setAdjustGunForRobotTurn(true);
@@ -24,79 +27,71 @@ public class SecondBot extends AdvancedRobot {
 		setTurnRadarRightRadians(Double.POSITIVE_INFINITY);
 
 		while (true) {
-			// Tell the game we will want to move ahead 40000 -- some large number
-			setAhead(40000);
-			movingForward = true;
-			// Tell the game we will want to turn right 90
-			setTurnRight(90);
-			// At this point, we have indicated to the game that *when we do something*,
-			// we will want to move ahead and turn right. That's what "set" means.
-			// It is important to realize we have not done anything yet!
-			// In order to actually move, we'll want to call a method that
-			// takes real time, such as waitFor.
-			// waitFor actually starts the action -- we start moving and turning.
-			// It will not return until we have finished turning.
-			waitFor(new TurnCompleteCondition(this));
-			// Note: We are still moving ahead now, but the turn is complete.
-			// Now we'll turn the other way...
-			setTurnLeft(180);
-			// ... and wait for the turn to finish ...
-			waitFor(new TurnCompleteCondition(this));
-			// ... then the other way ...
-			setTurnRight(180);
-			// .. and wait for that turn to finish.
-			waitFor(new TurnCompleteCondition(this));
+			move();	
 		}
+	}
+
+	public void move() {
+		setAhead(40000); // move ahead some large number
+		movingForward = true;
+		
+		setTurnRight(90); // turn right 90
+		waitFor(new TurnCompleteCondition(this)); // blocks until we finish turning
+		
+		setTurnLeft(180); // still moving ahead now, but turn right is complete
+		waitFor(new TurnCompleteCondition(this)); // wait for the turn left to finish 
+		
+		setTurnRight(180); // still moving ahead now, but turn left is complete
+		waitFor(new TurnCompleteCondition(this)); // wait for turn right to finish
+	}
+	
+	public void onScannedRobot(ScannedRobotEvent e) {
+		State current = computeEnemyState(e);
+		storeEnemyState(e, current); // store current state
+
+		double firePower = Math.min(500 / e.getDistance(), 3); // firepower based on distance
+		double bulletSpeed = 20 - firePower * 3;
+		long timeToHit = (long) (e.getDistance() / bulletSpeed); // distance = rate * time, solved for time
+
+		// predict his next location
+		double[] predicted = predictFutureLocation(e, timeToHit, current);
+
+		shootAtLocation(firePower, predicted);
 
 	}
 
-	public void onScannedRobot(ScannedRobotEvent e) {
-		// add current state to tree & lastEnemyState
+	private void shootAtLocation(double firePower, double[] predicted) {
+		double absDeg = absoluteBearing(getX(), getY(), predicted[0], predicted[1]);
+		
+		setTurnGunRight(normalizeBearing(absDeg - getGunHeading())); // turn the gun to the predicted x,y location
+
+		if (getGunHeat() == 0 && Math.abs(getGunTurnRemaining()) < 10) {
+			setFire(firePower);
+		}
+	}
+
+	private void storeEnemyState(ScannedRobotEvent e, State current) {
 		if (!enemies.containsKey(e.getName())) {
 			enemies.put(e.getName(), new Tree(State.MAX_RECTANGLE, null));
 		}
-
-		double angle = Math.toRadians((getHeading() + e.getBearing()) % 360);
-
-		int scannedX = (int) (getX() + Math.sin(angle) * e.getDistance());
-		int scannedY = (int) (getY() + Math.cos(angle) * e.getDistance());
-
-		State current = new State(scannedX, scannedY);
 
 		if (lastEnemyState.containsKey(e.getName())) {
 			enemies.get(e.getName()).add(lastEnemyState.get(e.getName()), current);
 		}
 
 		lastEnemyState.put(e.getName(), current);
-
-		// finished adding current state
-
-		System.out.println(e.getName() + " : " + enemies.get(e.getName()).getNodesCount());
-
-		// calculate firepower based on distance
-		double firePower = Math.min(500 / e.getDistance(), 3);
-		// calculate speed of bullet
-		double bulletSpeed = 20 - firePower * 3;
-		// distance = rate * time, solved for time
-		long timeToHit = (long) (e.getDistance() / bulletSpeed);
-
-		// calculate gun turn to predicted x,y location
-		double[] predicted = predictFutureLocation(e, timeToHit, current);
-
-		double absDeg = absoluteBearing(getX(), getY(), predicted[0], predicted[1]);
-
-		// turn the gun to the predicted x,y location
-		setTurnGunRight(normalizeBearing(absDeg - getGunHeading()));
-
-		// if the gun is cool and we're pointed in the right direction, shoot!
-		if (getGunHeat() == 0 && Math.abs(getGunTurnRemaining()) < 10) {
-			System.out.println("fire:");
-			setFire(firePower);
-		}
-
 	}
 
-	// uses data from the tree to predict future state
+	private State computeEnemyState(ScannedRobotEvent e) {
+		double angle = Math.toRadians((getHeading() + e.getBearing()) % 360);
+
+		int scannedX = (int) (getX() + Math.sin(angle) * e.getDistance());
+		int scannedY = (int) (getY() + Math.cos(angle) * e.getDistance());
+		
+		return new State(scannedX, scannedY);
+	}
+
+	// use data from the tree to predict future state
 	double[] predictFutureLocation(ScannedRobotEvent e, long timeToHit, State current) {
 		Tree previousEnemyMoves = enemies.get(e.getName());
 		Node closestState = previousEnemyMoves.findClosest(current);
@@ -110,17 +105,22 @@ public class SecondBot extends AdvancedRobot {
 		State from = (State) closestState.getFrom();
 		State to = (State) closestState.getTo();
 
-		System.out.println("predict: " + (current.x + to.x - from.x) + " to: " + (current.y + to.y - from.y));
+		System.out.println("predicted: (" + (current.x + to.x - from.x) + ", " + (current.y + to.y - from.y) 
+				+ ") to: (" + (current.y + to.y - from.y) + ", " + (current.y + to.y - from.y) + ")");
 
 		return new double[] { current.x + to.x - from.x, current.y + to.y - from.y };
 	}
 
 	// normalizes a bearing to between +180 and -180
 	double normalizeBearing(double angle) {
-		while (angle > 180)
+		while (angle > 180) {
 			angle -= 360;
-		while (angle < -180)
+		}
+		
+		while (angle < -180) {
 			angle += 360;
+		}
+		
 		return angle;
 	}
 
